@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "docpipe"
+version = "0.1.0"
+description = "Fetch documents from web sources and turn them into clean text."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+]
+
+[project.optional-dependencies]
+# Text-layer PDF extraction (pdfplumber + pypdf).
+pdf = ["pdfplumber>=0.10.0", "pypdf>=4.0.0"]
+# Scanned-PDF fallback. Also needs the system binaries `tesseract` and `poppler-utils`.
+ocr = ["pytesseract>=0.3.10", "pdf2image>=1.17.0"]
+# JS-rendered pages. Needs `playwright install chromium` after install.
+browser = ["playwright>=1.40"]
+all = [
+    "pdfplumber>=0.10.0",
+    "pypdf>=4.0.0",
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.17.0",
+    "playwright>=1.40",
+]
+dev = ["pytest>=7.4.0", "flake8>=6.0.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docpipe"]
