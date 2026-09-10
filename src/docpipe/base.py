@@ -41,6 +41,10 @@ class FetchedDocument(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
     source_url: str
+    # The link text the document was found under ("6-15-2026 Board Meeting").
+    # Often the only place its real date appears: the file name is a UUID and
+    # the body opens by approving the *previous* meeting's minutes.
+    title: Optional[str] = None
     local_path: Optional[Path] = None
     raw_content: Optional[bytes] = None
     raw_html: Optional[str] = None

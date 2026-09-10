@@ -63,7 +63,7 @@ class PdfListingSource(BaseSource):
             return []
 
         soup = BeautifulSoup(response.text, "lxml")
-        dom_ordered: list[tuple[Optional[int], str]] = []
+        dom_ordered: list[tuple[Optional[int], str, str]] = []
         seen: set[str] = set()
         for a in soup.find_all("a", href=True):
             match = detail_re.search(a["href"])
@@ -77,13 +77,13 @@ class PdfListingSource(BaseSource):
                 key: Optional[int] = int(match.group(1))
             except (ValueError, IndexError):
                 key = None
-            dom_ordered.append((key, full))
+            dom_ordered.append((key, full, a.get_text(" ", strip=True)))
 
         if not dom_ordered:
             logger.warning(f"{self.tag} PdfListing: no detail links found")
             return []
 
-        if all(key is not None for key, _ in dom_ordered):
+        if all(key is not None for key, _, _ in dom_ordered):
             ordered = sorted(dom_ordered, key=lambda kv: kv[0] or 0, reverse=True)
         else:
             ordered = dom_ordered
@@ -93,13 +93,13 @@ class PdfListingSource(BaseSource):
         )
 
         documents: list[FetchedDocument] = []
-        for _, detail_url in ordered[:limit]:
-            document = self._fetch_detail_pdf(detail_url)
+        for _, detail_url, label in ordered[:limit]:
+            document = self._fetch_detail_pdf(detail_url, label)
             if document:
                 documents.append(document)
         return documents
 
-    def _fetch_detail_pdf(self, detail_url: str) -> Optional[FetchedDocument]:
+    def _fetch_detail_pdf(self, detail_url: str, label: str = "") -> Optional[FetchedDocument]:
         response = _http.get(detail_url, self.settings)
         if response is None:
             return None
@@ -132,6 +132,7 @@ class PdfListingSource(BaseSource):
         local_path, content = result
         return FetchedDocument(
             source_url=pdf_url,
+            title=label or None,
             local_path=local_path,
             raw_content=content,
             content_type="pdf",

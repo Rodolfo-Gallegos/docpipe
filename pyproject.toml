@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docpipe"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fetch documents from web sources and turn them into clean text."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,9 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "lxml>=4.9.0",
 ]
+
+[project.scripts]
+docpipe = "docpipe.cli:main"
 
 [project.optional-dependencies]
 # Text-layer PDF extraction (pdfplumber + pypdf).
@@ -34,3 +37,8 @@ dev = ["pytest>=7.4.0", "flake8>=6.0.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/docpipe"]
+
+# The agent kit (skill + subagent definitions) ships with the package
+# so `docpipe agent-kit` works from a plain pip install.
+[tool.hatch.build.targets.wheel.force-include]
+"src/docpipe/agent_kit" = "docpipe/agent_kit"

@@ -1,18 +1,29 @@
 # docpipe
 
-Fetch documents from web sources and turn them into clean text.
+Find document sources on the public web, classify them, and turn what they
+publish into clean text. Built to be driven by an agent.
 
-Extracted from a production pipeline that scrapes public board minutes across
-hundreds of US school districts, generalized so the same machinery works on any
-document source: tender portals, regulator filings, press-release archives,
-grant announcements.
+Extracted from a production pipeline that scrapes public board minutes
+across hundreds of US school districts, generalized so the same machinery
+works on any document source: tender portals, regulator filings, grant
+announcements, press archives.
 
-Two halves, useful together and separately:
+Three layers, each usable on its own:
 
-- **Sources** retrieve documents from an origin (an index page, a JSON
-  endpoint, a JS-rendered SPA) and hand back files or HTML.
-- **Extractors** turn those into text, find the document's date, and cut the
-  text down to something an LLM can afford to read.
+- **A CLI that speaks JSON.** `probe` a URL and it tells you which adapter
+  reads it, with what config, with what evidence, and whether that actually
+  worked. `sniff` a SPA and it reports the JSON API behind it. Every
+  command prints JSON to stdout and logs to stderr, with exit codes worth
+  branching on.
+- **Sources** that retrieve documents: an index page, a JSON endpoint, a
+  JS-rendered app.
+- **Extractors** that turn those into text, find the document's date, and
+  cut it down to fit a context budget.
+
+The design rule: docpipe never calls an LLM. Your agent already knows how
+to search the web and read a page. What it cannot do reliably is guess an
+adapter config from prose, or know whether a guess works. That part is
+mechanical, so docpipe does it mechanically and hands back evidence.
 
 ## Install
 
@@ -32,7 +43,115 @@ Extras, because a project that only reads PDFs should not install a browser:
 `ocr` also needs the system binaries `tesseract` and `poppler-utils`.
 `browser` needs `playwright install chromium` after pip.
 
-## Quickstart
+## Driving it from an agent
+
+Install the skill and subagent definitions into a project:
+
+```bash
+docpipe agent-kit --into .
+```
+
+That writes `.claude/skills/docpipe/SKILL.md` (how and when to use each
+command) and four subagents:
+
+| Subagent | Does |
+|---|---|
+| `source-finder` | Searches for where an organization publishes documents, classifies the page, verifies it, records it |
+| `api-sniffer` | Given a SPA, finds the JSON API behind it and proves it can be called without a browser |
+| `adapter-writer` | Turns an endpoint brief into a registered, tested adapter |
+| `source-fixer` | Diagnoses a source that stopped working and applies the smallest fix |
+
+Existing files are never overwritten without `--force`, so your edits
+survive an upgrade.
+
+### The loop
+
+```bash
+# 1. The agent searches the web and finds a candidate page.
+
+# 2. Classify it, and actually run it.
+docpipe probe "https://example.org/board/minutes" --verify
+```
+
+```json
+{
+  "candidates": [{
+    "source_type": "pdf_direct",
+    "config": {"page_url": "https://example.org/board/minutes",
+               "pdf_link_pattern": "/fs/resource-manager/view/"},
+    "confidence": "high",
+    "evidence": [
+      "25 links share the route shape /fs/<slug>/view/<slug>",
+      "the first one answers with Content-Type application/pdf, so these are the documents themselves, not detail pages"
+    ],
+    "verified": true,
+    "verified_note": "Fetched https://example.org/fs/... and extracted 9461 chars via pdfplumber."
+  }]
+}
+```
+
+`--verify` runs the top candidate for one document, and tries the next one
+when it comes back empty, promoting whichever actually works. A
+high-confidence guess is still a guess; `verified: true` is the answer.
+
+```bash
+# 3. If it is a SPA, find the API before paying for a browser.
+docpipe sniff "https://example.org/portal" --wait 10
+
+# 4. Record the working config.
+docpipe add sources.json "https://example.org/board/minutes" --id acme --verify
+
+# 5. Harvest, and read the journal.
+docpipe run sources.json --limit 5 --raw-dir ./data/raw
+```
+
+Every run returns a per-source journal: which steps ran, what came back,
+and a diagnosis when something is off.
+
+```json
+{"status": "partial",
+ "steps": [{"name": "fetch", "ok": true, "detail": "3 documents", "elapsed_ms": 5170}],
+ "diagnosis": "Documents were fetched but none produced usable text. If they are scans, enable OCR..."}
+```
+
+`status` is one of `ok`, `partial`, `empty`, `error`. Exit code 0 means
+every source came back clean; 2 means something needs attention. `partial`
+counts as needing attention on purpose: a run that downloads three PDFs and
+extracts nothing from them looks like success in a log and is not one.
+
+### Commands
+
+| Command | For |
+|---|---|
+| `probe <url> [--verify]` | Which adapter reads this, with what config |
+| `sniff <url>` | The JSON API behind a JS-rendered page |
+| `schema [type]` | The fields an adapter accepts, with docs |
+| `validate <type> --config` | Check a config before running it |
+| `fetch <type> --config` | Run one adapter now, no recipe file |
+| `add <recipe> <url> --id` | Probe and record into a recipe file |
+| `list <recipe>` / `run <recipe>` | Show / execute recorded sources |
+| `extract <paths>` | Text, method and date from local files |
+| `agent-kit --into <dir>` | Install the skill and subagents |
+
+### The recipe file
+
+The durable artifact of the loop, and the input to every later run. Plain
+JSON, so an agent can append to it and a human can review the diff.
+
+```json
+{
+  "version": 1,
+  "sources": [{
+    "id": "acme",
+    "source_type": "pdf_direct",
+    "config": {"page_url": "https://example.org/board/minutes"},
+    "enabled": true,
+    "notes": "Verified 2026-09-10: 3 documents, pdfplumber."
+  }]
+}
+```
+
+## Using it as a library
 
 ```python
 from pathlib import Path

@@ -51,26 +51,25 @@ class HtmlPageSource(BaseSource):
             return []
 
         soup = BeautifulSoup(response.text, "lxml")
-        links: list[str] = []
+        links: dict[str, str] = {}
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            text = a.get_text(strip=True).lower()
-            if needle in href.lower() or needle in text:
+            label = a.get_text(" ", strip=True)
+            if needle in href.lower() or needle in label.lower():
                 full_url = urljoin(page_url, href)
                 # Binary attachments belong to the PDF adapters.
                 if not full_url.lower().endswith((".pdf", ".doc", ".docx")):
-                    links.append(full_url)
-
-        links = list(dict.fromkeys(links))
+                    links.setdefault(full_url, label)
         logger.info(f"{self.tag} Found {len(links)} candidate pages")
 
         documents: list[FetchedDocument] = []
-        for url in links[:limit]:
+        for url in list(links)[:limit]:
             page_response = _http.get(url, self.settings)
             if page_response is None:
                 continue
             documents.append(FetchedDocument(
                 source_url=url,
+                title=links[url] or None,
                 raw_html=page_response.text,
                 content_type="html",
                 fetched_at=datetime.now(timezone.utc),

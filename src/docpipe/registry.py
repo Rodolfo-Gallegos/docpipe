@@ -21,6 +21,8 @@ from docpipe.base import BaseSource
 from docpipe.settings import Settings
 
 _REGISTRY: dict[str, type[BaseSource]] = {}
+# First name each class registered under. The rest are aliases.
+_CANONICAL: dict[type[BaseSource], str] = {}
 
 T = TypeVar("T", bound=type[BaseSource])
 
@@ -37,9 +39,15 @@ def register_source(*names: str) -> Callable[[T], T]:
                     f"{existing.__name__}"
                 )
             _REGISTRY[name] = cls
+        _CANONICAL.setdefault(cls, names[0])
         return cls
 
     return decorator
+
+
+def canonical_name(cls: type[BaseSource]) -> str:
+    """The name a class was first registered under, aliases aside."""
+    return _CANONICAL.get(cls, cls.__name__)
 
 
 def available_sources() -> list[str]:

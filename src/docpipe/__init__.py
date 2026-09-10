@@ -41,7 +41,7 @@ from docpipe.settings import DEFAULT_SETTINGS, Settings
 # Registers the built-in adapters as a side effect of import.
 from docpipe import sources as sources  # noqa: E402,F401
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "BaseSource",

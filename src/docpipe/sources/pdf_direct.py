@@ -53,7 +53,7 @@ class PdfDirectSource(BaseSource):
             return []
 
         soup = BeautifulSoup(response.text, "lxml")
-        pdf_links: list[str] = []
+        pdf_links: dict[str, str] = {}
         for a in soup.find_all("a", href=True):
             full_url = urljoin(page_url, a["href"])
 
@@ -66,13 +66,12 @@ class PdfDirectSource(BaseSource):
             if self.config.pdf_exclude_pattern and self.config.pdf_exclude_pattern in full_url:
                 continue
 
-            pdf_links.append(full_url)
+            pdf_links.setdefault(full_url, a.get_text(" ", strip=True))
 
-        pdf_links = list(dict.fromkeys(pdf_links))
         logger.info(f"{self.tag} Found {len(pdf_links)} candidate PDFs")
 
         documents: list[FetchedDocument] = []
-        for pdf_url in pdf_links[:limit]:
+        for pdf_url in list(pdf_links)[:limit]:
             result = _http.download(
                 pdf_url, self.storage_dir(), self.settings, fallback_name="document.pdf"
             )
@@ -81,6 +80,7 @@ class PdfDirectSource(BaseSource):
             local_path, content = result
             documents.append(FetchedDocument(
                 source_url=pdf_url,
+                title=pdf_links[pdf_url] or None,
                 local_path=local_path,
                 raw_content=content,
                 doc_date=parse_date_from_url(pdf_url),
