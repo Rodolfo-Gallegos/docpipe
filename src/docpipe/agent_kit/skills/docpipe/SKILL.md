@@ -60,14 +60,44 @@ Writes the working config into a recipe file. `--verify` refuses to record
 a source that does not actually produce a document, which is the point:
 the recipe file should only ever contain sources that work.
 
-**5. Harvest.**
+**5. Harvest, and remember.**
 
 ```bash
-docpipe run sources.json --limit 5 --raw-dir ./data/raw
+docpipe run sources.json --limit 5 --raw-dir ./data/raw --remember
 ```
 
-Runs every enabled source and returns a journal per source: which steps
-ran, what came back, and a diagnosis when something is off.
+Runs every source and returns a journal each: which steps ran, what came
+back, and a diagnosis when something is off. `--remember` writes the
+outcome back into the recipe file, which is what makes a fleet
+maintainable:
+
+- Three consecutive failures quarantine a source, with the reason
+  recorded. Later runs skip it until it is fixed, so you are not burning
+  requests on something dead. `--include-quarantined` runs it anyway.
+- A source that has *never* worked gets a different diagnosis than one
+  that worked for a year and stopped: the first is a bad config, the
+  second is a site that changed.
+- The URL shape of working documents is learned. When a run returns
+  documents whose URLs no longer match, the output flags `shape_changed`.
+  The source may still be fine, or it may now be fetching the wrong thing.
+
+Use `--remember` for scheduled and batch runs. Leave it off for one-off
+checks, where a read-only run is what you want.
+
+**6. Optional: turn text into data.**
+
+Only when the task calls for it, and only with a key present:
+
+```bash
+docpipe analyze ./data/raw/acme/*.pdf \
+  --prompt "Extract every contract award: vendor, amount, what for." \
+  --schema awards.schema.json --out ./extracted
+```
+
+You write the prompt and the schema; docpipe handles truncation to the
+context budget, the schema dialect differences between providers, and
+falling back when a model is busy. Check `truncation` in the result before
+trusting output from a long document.
 
 ## When a source breaks
 
@@ -83,6 +113,29 @@ Read `status` and `diagnosis`:
 | `empty` | ran clean, matched nothing | the page moved or changed markup; re-run `probe` |
 | `partial` | fetched, but little or no text | scanned PDFs (install the ocr extra), or the links point at landing pages |
 | `ok` | working | nothing |
+
+If the source is quarantined, `run` skips it and says why. Fix the config,
+then one successful run clears the quarantine automatically.
+
+### When you are blocked
+
+A 403, a 429 or a timeout from a host that works in a normal browser is a
+block, not a bad URL. `probe` returns a `cloud_render` config for exactly
+that case:
+
+```bash
+docpipe probe "<url>"     # returns cloud_render when it sees a block
+```
+
+`cloud_render` runs the page in a hosted browser (set
+`BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`). Add `proxy: true`
+only after a run without it fails: it costs more, and it only helps when
+the origin is banning datacenter IPs rather than running a bot check.
+
+If even that fails, record the source with `source_type: "blocked"` and a
+`reason`. Do not delete it. An absent source and an impossible one look
+identical in a recipe file, and the next person re-investigates it from
+scratch.
 
 Re-probing the URL is almost always the right first move: sites get
 redesigned, and the adapter that fit last year may not fit now.
@@ -118,3 +171,8 @@ docpipe extract big.pdf --max-chars 200000    # fit an LLM context budget
   means it works.
 - **Respect the site.** Reasonable limits, no parallel hammering. These
   are usually small public servers.
+- **Escalate in order.** `json_api` before HTML, HTML before
+  `playwright_render`, `playwright_render` before `cloud_render`. Each
+  step costs more than the one before it, and the last one costs money per
+  page.
+- **Never delete a blocked source.** Record it with a reason.

@@ -287,10 +287,6 @@ def parse_date_from_text(
     return None
 
 
-# Legacy name from the pipeline this was extracted from.
-parse_meeting_date_from_text = parse_date_from_text
-
-
 # ── URL / filename dates ────────────────────────────────────────────────
 # A separate, stricter pass: file names carry dates in a handful of shapes
 # and none of the surrounding-context problems.

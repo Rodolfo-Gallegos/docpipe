@@ -5,6 +5,8 @@ name, so `get_source("pdf_direct", ...)` resolves without the caller
 importing the module. Registration is what the import is for; the names
 are re-exported for direct use and for subclassing.
 """
+from docpipe.sources.blocked import BlockedConfig, BlockedSource
+from docpipe.sources.cloud_render import CloudRenderConfig, CloudRenderSource
 from docpipe.sources.html_page import HtmlPageConfig, HtmlPageSource
 from docpipe.sources.json_api import JsonApiConfig, JsonApiSource
 from docpipe.sources.pdf_direct import PdfDirectConfig, PdfDirectSource
@@ -15,6 +17,8 @@ from docpipe.sources.playwright_render import (
 )
 
 __all__ = [
+    "BlockedConfig", "BlockedSource",
+    "CloudRenderConfig", "CloudRenderSource",
     "HtmlPageConfig", "HtmlPageSource",
     "JsonApiConfig", "JsonApiSource",
     "PdfDirectConfig", "PdfDirectSource",

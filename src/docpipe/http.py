@@ -27,6 +27,38 @@ def sanitize_filename(name: str, max_chars: int = 200, fallback: str = "document
     return name or fallback
 
 
+def attempt(
+    url: str,
+    settings: Settings,
+    headers: Optional[Mapping[str, str]] = None,
+    **kwargs,
+) -> tuple[Optional[requests.Response], Optional[int], Optional[str]]:
+    """GET that reports how it failed. Returns (response, status, error).
+
+    `get` swallows failures, which is right for an adapter mid-run: one bad
+    link should not stop a batch. Diagnosis needs the opposite, because a
+    403 and a DNS failure mean completely different things: one says a
+    hosted browser might get through, the other says the URL is wrong.
+    """
+    try:
+        response = requests.get(
+            url,
+            headers={**settings.http_headers, **(headers or {})},
+            timeout=settings.http_timeout,
+            **kwargs,
+        )
+    except requests.Timeout as e:
+        return None, None, f"timeout after {settings.http_timeout}s: {e}"
+    except requests.ConnectionError as e:
+        return None, None, f"connection failed: {e}"
+    except requests.RequestException as e:
+        return None, None, str(e)
+
+    if response.status_code >= 400:
+        return None, response.status_code, f"HTTP {response.status_code}"
+    return response, response.status_code, None
+
+
 def get(
     url: str,
     settings: Settings,

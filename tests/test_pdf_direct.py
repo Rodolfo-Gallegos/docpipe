@@ -42,8 +42,6 @@ def test_reads_the_date_out_of_the_file_name(settings, fake_http):
     fake_http(_routes())
     docs = _source(settings).fetch_documents(limit=1)
     assert docs[0].doc_date == date(2026, 3, 16)
-    # The legacy attribute name still reads.
-    assert docs[0].meeting_date == docs[0].doc_date
 
 
 def test_exclude_pattern_drops_matching_links(settings, fake_http):

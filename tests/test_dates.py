@@ -42,7 +42,7 @@ def test_url_implausible_year_is_rejected():
 
 def test_picks_real_date_over_fiscal_year_end():
     text = (
-        "Slippery Rock Area School District\n"
+        "Northvale Regional Authority\n"
         "Budgeted Revenues and Expenses\n"
         "Fiscal Year Ended June 30, 2026\n"
         "Adopted June 23, 2025\n"

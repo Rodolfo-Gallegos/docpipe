@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, List, Literal, Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from docpipe.base import BaseSource, FetchedDocument, SourceConfig
 from docpipe.extract import html as html_extract
@@ -75,15 +75,9 @@ class JsonApiConfig(SourceConfig):
     date_field: str = "date"
     id_field: str = "id"
     filter_path: Optional[str] = "category.key"
-    filter_value: Optional[str] = Field(default=None, alias="category_key")
+    filter_value: Optional[str] = None
 
     pdf_url_field: str = "source_url"
-
-    @field_validator("mode", mode="before")
-    @classmethod
-    def _accept_legacy_mode(cls, value):
-        # "dadeschools" was the original name of the default mode.
-        return "metadata_items" if value == "dadeschools" else value
 
 
 def _dig(item: dict, path: str) -> Any:
@@ -96,7 +90,7 @@ def _dig(item: dict, path: str) -> Any:
     return current
 
 
-@register_source("json_api", "district_api")
+@register_source("json_api")
 class JsonApiSource(BaseSource):
     config_model = JsonApiConfig
     config: JsonApiConfig

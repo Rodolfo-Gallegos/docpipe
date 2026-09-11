@@ -174,3 +174,65 @@ def test_verify_rejects_a_fetch_that_yields_no_real_text(fake_http, settings):
     # An unparseable PDF yields no text, which is not a working source.
     assert result.best.verified is False
     assert "effectively empty" in result.best.verified_note or "extraction failed" in result.best.verified_note
+
+
+# ── Escalation: what to do when the door is shut ────────────────────────
+
+
+def _refuse(status=None, exc=None):
+    def handler(url, **kwargs):
+        if exc:
+            raise exc
+        response = make_response(text="blocked")
+        response.status_code = status
+        return response
+    return handler
+
+
+def test_a_403_suggests_the_hosted_browser(settings, monkeypatch):
+    import docpipe.http
+
+    def handler(url, **kwargs):
+        response = make_response(text="Forbidden")
+        response.status_code = 403
+        return response
+
+    monkeypatch.setattr(docpipe.http.requests, "get", handler)
+    result = probe("https://example.org/docs", settings=settings)
+
+    assert result.ok is False
+    assert result.platform == "blocked"
+    assert result.best.source_type == "cloud_render"
+    assert result.best.config == {"page_url": "https://example.org/docs"}
+    assert "proxy: true" in result.best.next_step
+
+
+def test_a_timeout_suggests_a_residential_exit(settings, monkeypatch):
+    import docpipe.http
+
+    monkeypatch.setattr(
+        docpipe.http.requests, "get",
+        lambda url, **kw: (_ for _ in ()).throw(requests.Timeout("timed out")),
+    )
+    result = probe("https://example.org/docs", settings=settings)
+
+    assert result.platform == "blocked"
+    assert result.best.source_type == "cloud_render"
+    assert result.best.config["proxy"] is True
+
+
+def test_a_404_does_not_suggest_heavier_machinery(settings, monkeypatch):
+    """A missing page is a wrong URL. No browser fixes that, and saying so
+    keeps an agent from burning money on it."""
+    import docpipe.http
+
+    def handler(url, **kwargs):
+        response = make_response(text="Not Found")
+        response.status_code = 404
+        return response
+
+    monkeypatch.setattr(docpipe.http.requests, "get", handler)
+    result = probe("https://example.org/gone", settings=settings)
+
+    assert result.candidates == []
+    assert "moved" in result.notes[0]

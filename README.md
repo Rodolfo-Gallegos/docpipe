@@ -3,10 +3,11 @@
 Find document sources on the public web, classify them, and turn what they
 publish into clean text. Built to be driven by an agent.
 
-Extracted from a production pipeline that scrapes public board minutes
-across hundreds of US school districts, generalized so the same machinery
-works on any document source: tender portals, regulator filings, grant
-announcements, press archives.
+For the long tail of sites that publish documents and have no API
+worth the name: tender portals, regulator filings, grant announcements,
+council and committee records, press archives. The kind of source where
+each site is a little different, none of them are worth a bespoke scraper,
+and together they are worth a lot.
 
 Three layers, each usable on its own:
 
@@ -130,8 +131,45 @@ extracts nothing from them looks like success in a log and is not one.
 | `fetch <type> --config` | Run one adapter now, no recipe file |
 | `add <recipe> <url> --id` | Probe and record into a recipe file |
 | `list <recipe>` / `run <recipe>` | Show / execute recorded sources |
+| `run --remember` | Execute and write back what it learned |
 | `extract <paths>` | Text, method and date from local files |
+| `analyze <paths>` | Text plus your prompt and schema, to JSON (needs a key) |
 | `agent-kit --into <dir>` | Install the skill and subagents |
+
+### Memory: maintaining a fleet by exception
+
+`docpipe run --remember` writes back what the run taught it:
+
+```json
+{
+  "id": "acme",
+  "source_type": "pdf_direct",
+  "config": {"page_url": "https://example.org/board/minutes"},
+  "memory": {
+    "success_count": 12,
+    "consecutive_failures": 0,
+    "last_ok_at": "2026-09-10T12:00:00+00:00",
+    "doc_url_pattern": "^https://example\\.org/files/[0-9-]+\\.pdf$"
+  }
+}
+```
+
+Three things come out of that:
+
+- **Quarantine.** Three consecutive failures and the source stops being
+  run, with a reason recorded. A source that never worked gets a different
+  diagnosis than one that worked for a year and stopped, because the first
+  is a bad config and the second is a site that changed. One success
+  releases it.
+- **Shape change.** The learned URL pattern is a tripwire. A source can
+  return documents and still be broken: a redesign that swaps the archive
+  for a "not found" list still yields links. When the URLs stop matching
+  what this source used to produce, the run says so.
+- **Triage by exception.** With a few hundred sources, the useful question
+  is not "did the run pass" but "which five need me today".
+
+Without `--remember` the file is never written to, so a run stays a
+read-only operation.
 
 ### The recipe file
 
@@ -150,6 +188,41 @@ JSON, so an agent can append to it and a human can review the diff.
   }]
 }
 ```
+
+## Optional: analysis with an LLM
+
+Everything above is deterministic and needs no API key. This one part is
+opt-in, and it is the boundary of what docpipe does: it hands the text to
+a model with *your* prompt and *your* schema, and gives you back JSON.
+
+```bash
+pip install 'docpipe[anthropic]'   # or 'docpipe[gemini]'
+export ANTHROPIC_API_KEY=...       # or GOOGLE_API_KEY
+
+docpipe analyze minutes.pdf \
+  --prompt "Extract every contract award: vendor, amount, and what for." \
+  --schema awards.schema.json
+```
+
+docpipe supplies no prompt and no schema. It cannot: what counts as a
+useful field depends entirely on what you are collecting. What it does
+supply is the plumbing that is identical every time, and annoying every
+time:
+
+- **Fitting the text to the budget.** Oversized documents go through
+  `truncate_smart`, and the result reports what was dropped. Silent
+  truncation would make the output a lie.
+- **One schema, either provider.** Anthropic requires
+  `additionalProperties: false`; Gemini rejects the same key outright.
+  Write standard JSON Schema and docpipe translates.
+- **Failing over.** A busy model falls back to a stand-in. A malformed
+  request does not: retrying a 400 just spends money twice.
+- **Not paying for nothing.** An empty document never reaches the model.
+
+The Gemini defaults are the rolling `-latest` aliases on purpose. Pinned
+Gemini versions get retired for new users while still appearing in the
+model list, so a pin that worked when you wrote it returns 404 a year
+later. Pass `--model` to pin deliberately.
 
 ## Using it as a library
 
@@ -194,7 +267,26 @@ page is already calling.
 | `pdf_direct` | Index page linking straight to files | one request + one per file |
 | `html_page` | Index page linking to HTML documents | one request per document |
 | `pdf_listing` | Index to per-item detail page to file | two requests per document |
-| `playwright_render` | JS-rendered page, real Chromium | 5 to 15 s per page |
+| `playwright_render` | JS-rendered page, local Chromium | 5 to 15 s per page |
+| `cloud_render` | Hosted browser, for origins that block yours | 10 to 30 s per page, billed |
+| `blocked` | A source you cannot read, recorded on purpose | nothing |
+
+The order is an escalation, and each step up costs more than the last:
+
+```
+json_api            milliseconds, no browser         always try first
+pdf_direct/html     one request                      server-rendered
+playwright_render   5-15s, local Chromium            content needs JS
+cloud_render        10-30s, someone else's browser   you are blocked
+blocked             nothing                          nothing gets through
+```
+
+`probe` tells you which step you are on, including the last two: a 403 or a
+timeout comes back with a `cloud_render` config already filled in, and
+`proxy: true` when the symptom points at a datacenter IP ban rather than a
+bot check. When even that fails, record the source as `blocked` with a
+reason. An absent source and an impossible one look identical in a recipe
+file, and the difference is worth keeping.
 
 Every adapter validates its config through pydantic at construction, so a
 misspelled key fails immediately instead of returning zero documents an hour

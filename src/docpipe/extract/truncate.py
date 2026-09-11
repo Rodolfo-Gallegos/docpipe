@@ -26,9 +26,10 @@ Four steps, each applied only if the document is still over budget:
    so the model can tell the text is non-contiguous.
 
 What counts as "filler" and what counts as "worth keeping" is entirely in
-the `TruncationProfile`. The default profile targets public-procurement
-documents (board minutes, agendas, council packets). Build your own with
-`keyword_profile()` or by instantiating `TruncationProfile` directly.
+the `TruncationProfile`. The default profile targets public procurement
+records: tenders, contract awards, budget approvals and the meeting
+records that carry them. Build your own with `keyword_profile()` or by
+instantiating `TruncationProfile` directly.
 
 Returns the truncated text plus metadata describing which path fired, so
 callers can log and audit how much content was dropped.

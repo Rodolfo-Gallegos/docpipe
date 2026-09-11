@@ -31,7 +31,7 @@ class HtmlPageConfig(SourceConfig):
         link's href *or* its visible text.
     """
 
-    page_url: str = Field(pattern=r"^https?://", alias="minutes_page_url")
+    page_url: str = Field(pattern=r"^https?://")
     link_pattern: str = "minutes"
 
 

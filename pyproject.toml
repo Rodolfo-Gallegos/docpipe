@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docpipe"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fetch documents from web sources and turn them into clean text."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,6 +26,14 @@ pdf = ["pdfplumber>=0.10.0", "pypdf>=4.0.0"]
 ocr = ["pytesseract>=0.3.10", "pdf2image>=1.17.0"]
 # JS-rendered pages. Needs `playwright install chromium` after install.
 browser = ["playwright>=1.40"]
+# Hosted browser for blocked origins. Needs BROWSERBASE_API_KEY and
+# BROWSERBASE_PROJECT_ID at runtime; no local chromium required.
+cloud = ["playwright>=1.40"]
+# Optional LLM analysis of the extracted text. Neither is needed for any
+# other part of docpipe, and nothing here runs without a key.
+anthropic = ["anthropic>=1.0"]
+gemini = ["google-genai>=0.3.0"]
+llm = ["anthropic>=1.0", "google-genai>=0.3.0"]
 all = [
     "pdfplumber>=0.10.0",
     "pypdf>=4.0.0",

@@ -186,19 +186,9 @@ def probe(
     counts.
     """
     settings = settings or DEFAULT_SETTINGS
-    response = _http.get(url, settings)
+    response, status, error = _http.attempt(url, settings)
     if response is None:
-        return ProbeResult(
-            url=url,
-            final_url=url,
-            ok=False,
-            platform="unreachable",
-            notes=[
-                "The URL did not respond. Check it in a browser: a 403 to a "
-                "datacenter IP that works from a laptop means a WAF, which "
-                "no adapter here defeats."
-            ],
-        )
+        return _unreachable(url, status, error)
 
     final_url = getattr(response, "url", None) or url
     html = response.text or ""
@@ -239,6 +229,78 @@ def probe(
     if verify and result.candidates:
         _verify(result, settings)
 
+    return result
+
+
+def _unreachable(url: str, status: Optional[int], error: Optional[str]) -> ProbeResult:
+    """Turn a failed fetch into a diagnosis and, where one exists, a way out.
+
+    The distinction that matters: a block is a door you may still open with
+    a different browser or a different IP, while a 404 or a DNS failure
+    means the URL itself is wrong and no amount of tooling helps.
+    """
+    result = ProbeResult(
+        url=url, final_url=url, ok=False, platform="unreachable",
+        stats={"http_status": status, "error": error},
+    )
+
+    if status in (401, 403, 406, 429) or status == 503:
+        result.platform = "blocked"
+        result.notes.append(
+            f"The origin answered {status} rather than refusing the connection, "
+            "so the server is up and is turning us away. Open the page in a "
+            "normal browser: if it loads there, this is a bot or IP block, not "
+            "a bad URL."
+        )
+        result.candidates.append(Candidate(
+            source_type="cloud_render",
+            platform="blocked",
+            config={"page_url": url},
+            confidence="medium",
+            evidence=[f"plain HTTP request returned {status}"],
+            next_step=(
+                "A hosted browser passes most WAF challenges. Set "
+                "BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID, then try "
+                "this config. If it still fails, add proxy: true to get a "
+                "residential exit IP, which is what an outright datacenter "
+                "ban needs. If that fails too, record it with source_type "
+                "\"blocked\" so nobody re-investigates it in six months."
+            ),
+        ))
+        return result
+
+    if status == 404:
+        result.notes.append(
+            "The server is up and says this page does not exist. The document "
+            "archive most likely moved: search the site for it rather than "
+            "reaching for a heavier adapter."
+        )
+        return result
+
+    if error and ("timeout" in error or "connection failed" in error):
+        result.platform = "blocked"
+        result.notes.append(
+            f"No response at all ({error}). Either the host is down, or it "
+            "drops traffic from datacenter ranges without answering, which "
+            "looks identical from here. Check whether the page loads from a "
+            "home connection."
+        )
+        result.candidates.append(Candidate(
+            source_type="cloud_render",
+            platform="blocked",
+            config={"page_url": url, "proxy": True},
+            confidence="low",
+            evidence=[error],
+            next_step=(
+                "proxy: true routes through a residential IP, which is the "
+                "only thing that helps if the origin is dropping datacenter "
+                "traffic. If the host is simply down, this will fail too, so "
+                "confirm the page loads somewhere before paying for it."
+            ),
+        ))
+        return result
+
+    result.notes.append(f"The URL did not respond: {error or 'unknown error'}.")
     return result
 
 

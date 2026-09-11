@@ -33,7 +33,7 @@ class PdfDirectConfig(SourceConfig):
         (archives, translations, agenda-vs-minutes splits).
     """
 
-    page_url: str = Field(pattern=r"^https?://", alias="minutes_page_url")
+    page_url: str = Field(pattern=r"^https?://")
     pdf_link_pattern: Optional[str] = None
     pdf_exclude_pattern: Optional[str] = None
 

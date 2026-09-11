@@ -9,7 +9,7 @@ The loop this is built for:
     docpipe probe <url> --verify     # what is this, and does it work?
     docpipe sniff <url>              # when it is a SPA: find the JSON API
     docpipe add sources.json <url> --id acme --verify
-    docpipe run sources.json         # fetch + extract everything
+    docpipe run sources.json --remember   # fetch, extract, and learn
     docpipe schema pdf_direct        # what fields does this adapter take?
 
 Exit codes: 0 clean success, 1 bad usage or invalid input, 2 the command
@@ -238,6 +238,92 @@ def cmd_extract(args) -> int:
     )
 
 
+def cmd_analyze(args) -> int:
+    from docpipe.analyze import AnalysisError, analyze, available_providers
+    from docpipe.extract import html as html_extract
+    from docpipe.extract import pdf as pdf_extract
+
+    prompt = args.prompt
+    if args.prompt_file:
+        try:
+            prompt = Path(args.prompt_file).read_text()
+        except OSError as e:
+            return _fail(f"could not read the prompt file: {e}")
+    if not prompt:
+        return _fail("a prompt is required: pass --prompt or --prompt-file")
+
+    schema = None
+    if args.schema:
+        try:
+            schema = json.loads(Path(args.schema).read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            return _fail(f"could not read the schema: {e}")
+
+    settings = _settings(args)
+    out_dir = Path(args.out) if args.out else None
+    if out_dir:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    failures = 0
+    for raw_path in args.paths:
+        entry: dict[str, Any] = {"path": raw_path}
+
+        if raw_path == "-":
+            text = sys.stdin.read()
+        else:
+            path = Path(raw_path)
+            if not path.exists():
+                entry.update(ok=False, error="file not found")
+                failures += 1
+                results.append(entry)
+                continue
+            try:
+                if path.suffix.lower() in (".html", ".htm"):
+                    text = html_extract.extract_text(path.read_text(errors="replace"))
+                elif path.suffix.lower() in (".txt", ".md", ""):
+                    text = path.read_text(errors="replace")
+                else:
+                    text, _ = pdf_extract.extract_text(path, settings)
+            except Exception as e:
+                entry.update(ok=False, error=f"could not extract text: {e}")
+                failures += 1
+                results.append(entry)
+                continue
+
+        try:
+            result = analyze(
+                text,
+                prompt=prompt,
+                schema=schema,
+                provider=args.provider,
+                model=args.model,
+                fallback_model=args.fallback_model,
+                max_input_chars=args.max_chars,
+            )
+        except AnalysisError as e:
+            return _emit({
+                "ok": False,
+                "error": str(e),
+                "providers_with_credentials": available_providers(),
+            }, EXIT_USAGE)
+
+        entry.update(result.to_dict())
+        if not result.ok:
+            failures += 1
+        if out_dir and result.ok:
+            target = out_dir / (Path(raw_path).stem + ".json")
+            target.write_text(json.dumps(result.data, indent=2, default=str) + "\n")
+            entry["output_path"] = str(target)
+            entry.pop("text", None)
+        results.append(entry)
+
+    return _emit(
+        {"ok": failures == 0, "results": results},
+        EXIT_OK if failures == 0 else EXIT_FAILED,
+    )
+
+
 def cmd_agent_kit(args) -> int:
     """Copy the skill and subagent definitions into a project.
 
@@ -366,12 +452,23 @@ def cmd_run(args) -> int:
     except (ValueError, json.JSONDecodeError) as e:
         return _fail(str(e))
 
-    selected = [r for r in book.enabled_sources() if not args.only or r.id in args.only]
+    pool = book.enabled_sources() if args.include_quarantined else book.active_sources()
+    selected = [r for r in pool if not args.only or r.id in args.only]
+
+    skipped = [
+        {"id": r.id, "reason": r.memory.quarantine_reason}
+        for r in book.quarantined_sources()
+        if not args.include_quarantined and (not args.only or r.id in args.only)
+    ]
+
     if not selected:
         return _fail(
             "no sources to run",
             recipe_file=str(args.recipe),
             known=[r.id for r in book],
+            quarantined=skipped,
+            hint=("All matching sources are quarantined. Pass "
+                  "--include-quarantined to run them anyway.") if skipped else None,
         )
 
     settings = _settings(args)
@@ -386,7 +483,29 @@ def cmd_run(args) -> int:
             extract=not args.no_extract,
             max_chars=args.max_chars,
         )
-        runs.append(record.to_dict())
+        run_payload = record.to_dict()
+
+        if args.remember:
+            urls = [d.source_url for d in record.documents]
+            # Check the learned shape before recording, so the comparison is
+            # against what we knew going in, not what we just learned.
+            if record.status == "ok" and not recipe.memory.matches_learned_shape(urls):
+                run_payload["shape_changed"] = {
+                    "learned_pattern": recipe.memory.doc_url_pattern,
+                    "note": (
+                        "The source returned documents whose URLs no longer "
+                        "match the shape it used to produce. It may still be "
+                        "working, or the site was redesigned and this is now "
+                        "fetching the wrong thing. Worth a look."
+                    ),
+                }
+            recipe.memory.record(record.status, urls, error=record.error or record.diagnosis)
+            run_payload["memory"] = recipe.memory.to_dict()
+
+        runs.append(run_payload)
+
+    if args.remember:
+        book.save()
 
     summary: dict[str, int] = {}
     for run in runs:
@@ -397,15 +516,21 @@ def cmd_run(args) -> int:
     # unattended caller has to be able to see it in the exit code.
     clean = summary.get("ok", 0) == len(runs)
 
-    return _emit(
-        {
-            "ok": clean,
-            "recipe_file": str(args.recipe),
-            "summary": summary,
-            "runs": runs,
-        },
-        EXIT_OK if clean else EXIT_FAILED,
-    )
+    payload = {
+        "ok": clean,
+        "recipe_file": str(args.recipe),
+        "summary": summary,
+        "runs": runs,
+    }
+    if skipped:
+        payload["skipped_quarantined"] = skipped
+    if args.remember:
+        payload["remembered"] = True
+        newly = [r["source_id"] for r in runs if r.get("memory", {}).get("quarantined")]
+        if newly:
+            payload["newly_quarantined"] = newly
+
+    return _emit(payload, EXIT_OK if clean else EXIT_FAILED)
 
 
 # ── Parser ──────────────────────────────────────────────────────────────
@@ -473,6 +598,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-ocr", action="store_true")
     p.set_defaults(func=cmd_extract)
 
+    p = sub.add_parser("analyze", parents=[common],
+                       help="send extracted text to a model and get structured data back")
+    p.add_argument("paths", nargs="+", help="files to analyze, or - for stdin")
+    p.add_argument("--prompt", help="what to extract, in your words")
+    p.add_argument("--prompt-file", help="read the prompt from a file")
+    p.add_argument("--schema", help="path to a JSON Schema constraining the output")
+    p.add_argument("--provider", choices=["anthropic", "gemini"],
+                   help="default: whichever key is in the environment")
+    p.add_argument("--model")
+    p.add_argument("--fallback-model", help="used when the primary is busy")
+    p.add_argument("--max-chars", type=int, default=400_000,
+                   help="smart-truncate the input to this budget first")
+    p.add_argument("--out", help="write one JSON file per input instead of inlining")
+    p.add_argument("--no-ocr", action="store_true")
+    p.set_defaults(func=cmd_analyze)
+
     p = sub.add_parser("agent-kit", parents=[common],
                        help="install the skill and subagent definitions into a project")
     p.add_argument("--into", default=".", help="project root (default: here)")
@@ -508,6 +649,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-extract", action="store_true")
     p.add_argument("--max-chars", type=int)
     p.add_argument("--no-ocr", action="store_true")
+    p.add_argument("--remember", action="store_true",
+                   help="write what this run taught us back into the recipe file")
+    p.add_argument("--include-quarantined", action="store_true",
+                   help="also run sources quarantined after repeated failures")
     add_http_flags(p)
     p.set_defaults(func=cmd_run)
 

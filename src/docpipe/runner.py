@@ -180,9 +180,9 @@ def _extract_all(record, source, documents, max_chars, truncation_profile):
 
         # Most adapters cannot know the document's date: the listing shows a
         # title and the URL is a UUID. Fill the gap, preferring the title
-        # over the body. Minutes routinely open by approving the *previous*
-        # meeting's minutes, so the first date in the text is often the wrong
-        # one, while the link said "6-15-2026 Board Meeting" all along.
+        # over the body. Documents routinely open by referring to an earlier
+        # one, so the first date in the text is often the wrong one, while
+        # the link said "2026-06-15 Quarterly Report" all along.
         if described.doc_date is None:
             from docpipe.extract.dates import parse_date_from_text, parse_date_from_url
 

@@ -33,7 +33,7 @@ class FetchedDocument(BaseModel):
     from whenever the caller later persists or processes the document.
 
     `doc_date` is the date the document itself is about (publication,
-    meeting, filing), not the fetch date. It is best-effort: adapters set
+    filing, session), not the fetch date. It is best-effort: adapters set
     it when the listing or the URL exposes it, otherwise it stays None and
     the caller can fill it from the text with `docpipe.extract.dates`.
     """
@@ -41,23 +41,16 @@ class FetchedDocument(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
     source_url: str
-    # The link text the document was found under ("6-15-2026 Board Meeting").
-    # Often the only place its real date appears: the file name is a UUID and
-    # the body opens by approving the *previous* meeting's minutes.
+    # The link text the document was found under ("2026-06-15 Quarterly
+    # Report"). Often the only place its real date appears: the file name is
+    # a UUID and the body opens by referring to an earlier document.
     title: Optional[str] = None
     local_path: Optional[Path] = None
     raw_content: Optional[bytes] = None
     raw_html: Optional[str] = None
-    # `meeting_date` is the legacy name this model shipped with; it still
-    # works as a constructor keyword and as a read-only attribute.
-    doc_date: Optional[date] = Field(default=None, alias="meeting_date")
+    doc_date: Optional[date] = None
     content_type: str
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    @property
-    def meeting_date(self) -> Optional[date]:
-        """Backward-compatible alias for `doc_date`."""
-        return self.doc_date
 
 
 class BaseSource(ABC):

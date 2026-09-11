@@ -133,22 +133,6 @@ def test_client_side_filter_by_nested_field(settings, fake_http):
     assert docs[0].source_url.endswith("/41")
 
 
-def test_legacy_mode_and_field_names_still_work(settings):
-    """Configs written against the original adapter keep working:
-    mode "dadeschools" and the "category_key" field name."""
-    source = get_source(
-        "json_api", "legacy",
-        {
-            "api_url": "https://mainapi.example.gov/api/v1/notices",
-            "mode": "dadeschools",
-            "category_key": "bids",
-        },
-        settings=settings,
-    )
-    assert source.config.mode == "metadata_items"
-    assert source.config.filter_value == "bids"
-
-
 def test_custom_field_mapping(settings, fake_http):
     fake_http(_routes({"results": [{"ref": "A-9", "when": "2026-01-05", "body": "Tender notice"}]}))
     source = get_source(

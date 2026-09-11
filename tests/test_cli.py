@@ -14,13 +14,13 @@ def run(capsys, *argv):
     return code, json.loads(out)
 
 
-def test_sources_lists_adapters_and_marks_aliases(capsys):
+def test_sources_lists_every_adapter_with_a_summary(capsys):
     code, payload = run(capsys, "sources")
     assert code == EXIT_OK and payload["ok"]
     by_name = {s["source_type"]: s for s in payload["sources"]}
-    assert "pdf_direct" in by_name
-    assert by_name["district_api"]["alias_of"] == "json_api"
-    assert by_name["pdf_direct"]["summary"]
+    for expected in ("pdf_direct", "html_page", "pdf_listing", "json_api"):
+        assert expected in by_name
+        assert by_name[expected]["summary"], f"{expected} has no summary for the agent to read"
 
 
 def test_schema_returns_a_usable_json_schema(capsys):
@@ -186,3 +186,49 @@ def test_agent_kit_installs_and_does_not_clobber(capsys, tmp_path):
     assert str(edited) in payload["skipped"]
     assert edited.read_text() == "my own version"
     assert "--force" in payload["hint"]
+
+
+def test_run_remember_writes_memory_and_quarantines(capsys, fake_http, tmp_path):
+    """Three failing runs put a source in quarantine, and the next routine
+    run skips it instead of burning requests on a source that is dead."""
+    fake_http(lambda url, **kw: make_response(text="<html><body>nothing here</body></html>"))
+    recipe = tmp_path / "sources.json"
+    recipe.write_text(json.dumps({
+        "version": 1,
+        "sources": [{
+            "id": "acme",
+            "source_type": "pdf_direct",
+            "config": {"page_url": "https://example.org/minutes"},
+        }],
+    }))
+
+    for _ in range(3):
+        code, payload = run(capsys, "run", str(recipe), "--remember",
+                            "--raw-dir", str(tmp_path / "raw"))
+        assert code == EXIT_FAILED
+        assert payload["runs"][0]["status"] == "empty"
+
+    assert payload["newly_quarantined"] == ["acme"]
+    saved = json.loads(recipe.read_text())["sources"][0]["memory"]
+    assert saved["failure_count"] == 3
+    assert saved["quarantined"] is True
+
+    # The next run skips it and says why.
+    code, payload = run(capsys, "run", str(recipe), "--raw-dir", str(tmp_path / "raw"))
+    assert code == EXIT_USAGE
+    assert payload["quarantined"][0]["id"] == "acme"
+    assert "--include-quarantined" in payload["hint"]
+
+
+def test_run_without_remember_leaves_the_file_untouched(capsys, fake_http, tmp_path):
+    fake_http(lambda url, **kw: make_response(text="<html><body>nothing</body></html>"))
+    recipe = tmp_path / "sources.json"
+    original = json.dumps({
+        "version": 1,
+        "sources": [{"id": "acme", "source_type": "pdf_direct",
+                     "config": {"page_url": "https://example.org/m"}}],
+    })
+    recipe.write_text(original)
+
+    run(capsys, "run", str(recipe), "--raw-dir", str(tmp_path / "raw"))
+    assert recipe.read_text() == original
